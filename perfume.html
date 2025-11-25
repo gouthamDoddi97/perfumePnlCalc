@@ -452,17 +452,20 @@
             <div class="alert alert-info">
                 <span class="icon">ℹ️</span>
                 <div>
-                    <strong>Format:</strong> <code>OilName, AED_per_litre, concentration%</code><br>
-                    Example: <code>ArabianRose, 1200, 25</code> or just <code>ArabianRose, 1200</code> (will use default
-                    concentrations)
+                    <strong>Format:</strong> <code>OilName, AED_per_litre, concentration%, sellingPrice, bottleSize_ml</code><br>
+                    <strong>Examples:</strong><br>
+                    • <code>ArabianRose, 600, 25</code> - Uses default price (₹1000) and size (50ml)<br>
+                    • <code>ArabianRose, 600, 25, 1200</code> - Custom selling price ₹1200 for 50ml<br>
+                    • <code>ArabianRose, 600, 25, 1200, 100</code> - Custom price ₹1200 for 100ml bottle<br>
+                    • <code>ArabianRose, 600</code> - Uses default concentrations, price & bottle size
                 </div>
             </div>
 
             <div class="form-group">
                 <label>Oil List <span class="label-info">(one per line)</span></label>
-                <textarea id="oils" oninput="updatePreview()">ArabianRose, 600, 25
-BlackAmber, 800, 20
-CitrusBlend, 1200, 15
+                <textarea id="oils" oninput="updatePreview()">Oud maracuja, 700, 30, 1000, 50
+dior suvage, 450, 25, 600, 100
+ArabianRose, 600, 25
 LuxuryOud, 1500, 30</textarea>
             </div>
 
@@ -497,6 +500,7 @@ LuxuryOud, 1500, 30</textarea>
                     <thead>
                         <tr>
                             <th>Oil Name</th>
+                            <th>Size (ml)</th>
                             <th>Conc %</th>
                             <th>Oil ml</th>
                             <th>AED/L</th>
@@ -511,7 +515,7 @@ LuxuryOud, 1500, 30</textarea>
                     </thead>
                     <tbody id="previewBody">
                         <tr>
-                            <td colspan="11" style="text-align: center; padding: 40px; color: #999;">
+                            <td colspan="12" style="text-align: center; padding: 40px; color: #999;">
                                 Add oils above to see calculations...
                             </td>
                         </tr>
@@ -553,7 +557,7 @@ LuxuryOud, 1500, 30</textarea>
             ].filter(c => c > 0);
         }
 
-        /* Parse textarea lines into {name, aed, conc?} */
+        /* Parse textarea lines into {name, aed, conc?, sellingPrice?, bottleSize?} */
         function parseOils(text) {
             const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
             const parsed = [];
@@ -563,7 +567,15 @@ LuxuryOud, 1500, 30</textarea>
                 const name = parts[0];
                 const aed = safeNum(parts[1], 0);
                 const conc = (parts.length >= 3) ? safeNum(parts[2], 0) : 0;
-                parsed.push({ name: name, aed: aed, conc: conc });
+                const sellingPrice = (parts.length >= 4) ? safeNum(parts[3], 0) : 0;
+                const bottleSize = (parts.length >= 5) ? safeNum(parts[4], 0) : 0;
+                parsed.push({ 
+                    name: name, 
+                    aed: aed, 
+                    conc: conc,
+                    sellingPrice: sellingPrice,
+                    bottleSize: bottleSize
+                });
             }
             return parsed;
         }
@@ -594,33 +606,48 @@ LuxuryOud, 1500, 30</textarea>
             const customsPct = inputs.customs / 100;
             const swsPct = inputs.sws / 100;
             const gstPct = inputs.gst / 100;
-            const bottle = inputs.bottle;
+            const defaultBottle = inputs.bottle;
             const labels = inputs.labels;
             const pack = inputs.pack;
             const ship = inputs.ship;
-            const sellingPrice = inputs.sell;
+            const defaultSellingPrice = inputs.sell;
             const sellIncludesGST = inputs.sellIncludesGST;
             const cif = inputs.cif;
-
-            const netSellingPrice = sellIncludesGST ? (sellingPrice / (1 + gstPct)) : sellingPrice;
-            const gstAmountTop = sellIncludesGST ? (sellingPrice - netSellingPrice) : (netSellingPrice * gstPct);
+            const defaultBottleSize = 50; // Default 50ml
 
             const defaultConcs = getDefaultConcentrations();
 
             oilsParsed.forEach(item => {
                 const concs = (item.conc && item.conc > 0) ? [item.conc] : defaultConcs;
                 concs.forEach(conc => {
-                    const oilMl = 50 * (conc / 100.0);
+                    // Use custom selling price if provided, otherwise use default
+                    const sellingPrice = (item.sellingPrice && item.sellingPrice > 0) ? item.sellingPrice : defaultSellingPrice;
+                    // Use custom bottle size if provided, otherwise use default 50ml
+                    const bottleSize = (item.bottleSize && item.bottleSize > 0) ? item.bottleSize : defaultBottleSize;
+                    
+                    // Calculate size ratio for scaling costs
+                    const sizeRatio = bottleSize / 50.0;
+                    
+                    // Scale bottle, labels, pack, and ship costs based on bottle size
+                    const bottle = defaultBottle * sizeRatio;
+                    const labelsScaled = labels * sizeRatio;
+                    const packScaled = pack * sizeRatio;
+                    const shipScaled = ship * sizeRatio;
+                    
+                    const netSellingPrice = sellIncludesGST ? (sellingPrice / (1 + gstPct)) : sellingPrice;
+                    const gstAmountTop = sellIncludesGST ? (sellingPrice - netSellingPrice) : (netSellingPrice * gstPct);
+
+                    const oilMl = bottleSize * (conc / 100.0);
                     const oilLitres = oilMl / 1000.0;
                     const priceAED_perL = item.aed;
                     const priceAED_used = priceAED_perL * oilLitres;
                     const priceINR = priceAED_used * rate;
                     const dubaiVAT = priceINR * vatPct;
                     const landedOil = priceINR + dubaiVAT;
-                    const customsBase = cif ? (landedOil + ship) : landedOil;
+                    const customsBase = cif ? (landedOil + shipScaled) : landedOil;
                     const customsDuty = customsBase * customsPct;
                     const swsAmount = customsDuty * swsPct;
-                    const totalBeforeGST = landedOil + customsDuty + swsAmount + bottle + labels + pack + ship;
+                    const totalBeforeGST = landedOil + customsDuty + swsAmount + bottle + labelsScaled + packScaled + shipScaled;
                     const gstAmount = sellIncludesGST ? gstAmountTop : (netSellingPrice * gstPct);
                     const totalInclGST = totalBeforeGST + gstAmount;
                     const profitExcl = netSellingPrice - totalBeforeGST;
@@ -629,6 +656,7 @@ LuxuryOud, 1500, 30</textarea>
 
                     rows.push({
                         "Oil Name": item.name,
+                        "Bottle Size (ml)": bottleSize,
                         "Concentration %": conc,
                         "Oil ml used": round(oilMl, 3),
                         "AED per L": round(priceAED_perL, 2),
@@ -639,10 +667,10 @@ LuxuryOud, 1500, 30</textarea>
                         "Customs base (INR)": round(customsBase, 2),
                         "Customs duty (INR)": round(customsDuty, 2),
                         "SWS (INR)": round(swsAmount, 2),
-                        "Bottle (₹)": bottle,
-                        "Labels (₹)": labels,
-                        "Packaging (₹)": pack,
-                        "Shipping (₹)": ship,
+                        "Bottle (₹)": round(bottle, 2),
+                        "Labels (₹)": round(labelsScaled, 2),
+                        "Packaging (₹)": round(packScaled, 2),
+                        "Shipping (₹)": round(shipScaled, 2),
                         "Total before GST (₹)": round(totalBeforeGST, 2),
                         "Net selling price (₹)": round(netSellingPrice, 2),
                         "GST amount (₹)": round(gstAmount, 2),
@@ -667,7 +695,7 @@ LuxuryOud, 1500, 30</textarea>
             if (parsed.length === 0) {
                 document.getElementById('previewBody').innerHTML = `
       <tr>
-        <td colspan="11" style="text-align: center; padding: 40px; color: #999;">
+        <td colspan="12" style="text-align: center; padding: 40px; color: #999;">
           Add oils above to see calculations...
         </td>
       </tr>
@@ -685,6 +713,7 @@ LuxuryOud, 1500, 30</textarea>
                 html += `
       <tr>
         <td><strong>${row["Oil Name"]}</strong></td>
+        <td>${row["Bottle Size (ml)"]}ml</td>
         <td>${row["Concentration %"]}%</td>
         <td>${row["Oil ml used"]}</td>
         <td>AED ${row["AED per L"]}</td>
@@ -737,7 +766,7 @@ LuxuryOud, 1500, 30</textarea>
         /* Create and download XLSX using SheetJS */
         function downloadXLSX(rows, inputs) {
             const headers = [
-                "Oil Name", "Concentration %", "Oil ml used", "AED per L", "AED for used oil", "Price INR (oil qty)", "Dubai VAT (INR)",
+                "Oil Name", "Bottle Size (ml)", "Concentration %", "Oil ml used", "AED per L", "AED for used oil", "Price INR (oil qty)", "Dubai VAT (INR)",
                 "Landed oil (INR)", "Customs base (INR)", "Customs duty (INR)", "SWS (INR)", "Bottle (₹)", "Labels (₹)", "Packaging (₹)", "Shipping (₹)",
                 "Total before GST (₹)", "Net selling price (₹)", "GST amount (₹)", "Total incl GST (₹)", "Selling price (₹)",
                 "Profit excl GST (₹)", "Profit incl GST (₹)", "Profit margin (%)"
